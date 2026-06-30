@@ -5,7 +5,10 @@ include(GNUInstallDirs) # configurable CMAKE_INSTALL_*DIR
 cmake_minimum_required(VERSION 3.13)
 
 set(QUAZIP_HEADERS
+        ${CMAKE_CURRENT_BINARY_DIR}/quazip_config.h
         JlCompress.h
+        QuaCompress.h
+        QuaExtract.h
         ioapi.h
         minizip_crypt.h
         quaadler32.h
@@ -16,6 +19,7 @@ set(QUAZIP_HEADERS
         quazip.h
         quazip_global.h
         quazip_qt_compat.h
+        quazip_textcodec.h
         quazipdir.h
         quazipfile.h
         quazipfileinfo.h
@@ -29,6 +33,9 @@ set(QUAZIP_SOURCES
         unzip.c
         zip.c
         JlCompress.cpp
+        JlOptions.cpp
+        QuaCompress.cpp
+        QuaExtract.cpp
         qioapi.cpp
         quaadler32.cpp
         quachecksum32.cpp
@@ -36,6 +43,7 @@ set(QUAZIP_SOURCES
         quagzipfile.cpp
         quaziodevice.cpp
         quazip.cpp
+        quazip_textcodec.cpp
         quazipdir.cpp
         quazipfile.cpp
         quazipfileinfo.cpp
@@ -63,6 +71,7 @@ target_include_directories(${QUAZIP_LIB_TARGET_NAME} PRIVATE ${QUAZIP_INC})
 target_include_directories(${QUAZIP_LIB_TARGET_NAME} PUBLIC
 	$<BUILD_INTERFACE:${QUAZIP_SOURCE_DIR}>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
 	$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${QUAZIP_DIR_NAME}>
 	$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${QUAZIP_INCLUDE_PATH}>
 )
@@ -73,6 +82,10 @@ else()
 	target_compile_definitions(${QUAZIP_LIB_TARGET_NAME} PUBLIC QUAZIP_STATIC) # suppress dllimport
 endif()
 target_link_directories(${QUAZIP_LIB_TARGET_NAME} PUBLIC ${QUAZIP_LBD})
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${QUAZIP_LIB_TARGET_NAME} PRIVATE -Wshadow -Werror=shadow)
+endif()    
 
 include(CMakePackageConfigHelpers)
 

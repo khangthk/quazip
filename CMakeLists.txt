@@ -1,12 +1,12 @@
 # require 3.15 for GNUInstallDirs
 cmake_minimum_required(VERSION 3.15...3.18)
 
-project(QuaZip VERSION 1.4)
+project(QuaZip VERSION 1.7.2)
 
 include(cmake/clone-repo.cmake)
 
 set(QUAZIP_LIB_VERSION ${QuaZip_VERSION})
-set(QUAZIP_LIB_SOVERSION 1.4.0)
+set(QUAZIP_LIB_SOVERSION ${QuaZip_VERSION_MAJOR}.${QuaZip_VERSION_MINOR})
 
 if(EMSCRIPTEN)
   #option(ZLIB_INCLUDE "Path to include dir" "")
@@ -23,6 +23,7 @@ else()
 endif()
 
 OPTION(ZLIB_CONST "Sets ZLIB_CONST preprocessor definition" OFF)
+option(QUAZIP_ENABLE_QTEXTCODEC "Enable use of QTextCodec (requires Qt5 or Qt6 Core5Compat)" ON)
 
 # Make BZIP2 optional
 option(QUAZIP_BZIP2 "Enables BZIP2 compression" ON)
@@ -36,25 +37,16 @@ if (QUAZIP_USE_QT_ZLIB AND BUILD_SHARED_LIBS)
 endif()
 
 # Set the default value of `${QUAZIP_QT_MAJOR_VERSION}`.
-# We search quietly for Qt6, Qt5 and Qt4 in that order.
-# Qt6 and Qt5 provide config files for CMake.
-# Qt4 relies on `FindQt4.cmake`.
+# We search quietly for Qt6 and Qt5 in that order.
 find_package(
   QT NAMES Qt6 Qt5
   QUIET COMPONENTS Core
 )
 if (NOT QT_FOUND)
-  find_package(Qt4 QUIET COMPONENTS QtCore)
-  if (Qt4_FOUND)
-    set(QT_VERSION_MAJOR 4)
-  else()
-    # If neither 6, 5 nor 4 are found, we default to 5.
-    # The setup will fail further down.
-    set(QT_VERSION_MAJOR 5)
-  endif()
+    set(QT_VERSION_MAJOR 6)
 endif()
 
-set(QUAZIP_QT_MAJOR_VERSION ${QT_VERSION_MAJOR} CACHE STRING "Qt version to use (4, 5 or 6), defaults to ${QT_VERSION_MAJOR}")
+set(QUAZIP_QT_MAJOR_VERSION ${QT_VERSION_MAJOR} CACHE STRING "Qt version to use (6 or 5), defaults to ${QT_VERSION_MAJOR}")
 
 if (QUAZIP_QT_MAJOR_VERSION EQUAL 6)
     set(CMAKE_CXX_STANDARD 17)
@@ -72,20 +64,25 @@ set(CMAKE_DEBUG_POSTFIX d)
 
 set(QUAZIP_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(QUAZIP_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
-set(QUAZIP_LIB_FILE_NAME quazip${QuaZip_VERSION_MAJOR}-qt${QUAZIP_QT_MAJOR_VERSION})
+if(NOT QUAZIP_LIB_FILE_NAME)
+	set(QUAZIP_LIB_FILE_NAME quazip${QuaZip_VERSION_MAJOR}-qt${QUAZIP_QT_MAJOR_VERSION})
+endif()
 set(QUAZIP_LIB_TARGET_NAME QuaZip)
 set(QUAZIP_DIR_NAME QuaZip-Qt${QUAZIP_QT_MAJOR_VERSION}-${QUAZIP_LIB_VERSION})
 set(QUAZIP_PACKAGE_NAME QuaZip-Qt${QUAZIP_QT_MAJOR_VERSION})
 
+message(STATUS "QUAZIP_QT_MAJOR_VERSION set to ${QUAZIP_QT_MAJOR_VERSION}")
+message(STATUS "CMAKE_CXX_STANDARD set to ${CMAKE_CXX_STANDARD}")
+
 if(QUAZIP_QT_MAJOR_VERSION EQUAL 6)
-    find_package(Qt6 REQUIRED COMPONENTS Core Core5Compat
+    find_package(Qt6 REQUIRED COMPONENTS Core 
             OPTIONAL_COMPONENTS Network Test)
     message(STATUS "Found Qt version ${Qt6_VERSION} at ${Qt6_DIR}")
     set(QUAZIP_QT_ZLIB_COMPONENT BundledZLIB)
     set(QUAZIP_QT_ZLIB_HEADER_COMPONENT ZlibPrivate)
-    set(QUAZIP_LIB_LIBRARIES Qt6::Core Qt6::Core5Compat)
-    set(QUAZIP_TEST_QT_LIBRARIES Qt6::Core Qt6::Core5Compat Qt6::Network Qt6::Test)
-    set(QUAZIP_PKGCONFIG_REQUIRES "zlib, Qt6Core")
+    set(QUAZIP_LIB_LIBRARIES Qt6::Core )
+    set(QUAZIP_TEST_QT_LIBRARIES Qt6::Core Qt6::Network Qt6::Test)
+    set(QUAZIP_PKGCONFIG_REQUIRES_LIST zlib Qt6Core)
 elseif(QUAZIP_QT_MAJOR_VERSION EQUAL 5)
     find_package(Qt5 REQUIRED COMPONENTS Core
             OPTIONAL_COMPONENTS Network Test)
@@ -93,14 +90,7 @@ elseif(QUAZIP_QT_MAJOR_VERSION EQUAL 5)
     set(QUAZIP_QT_ZLIB_COMPONENT Zlib)
     set(QUAZIP_LIB_LIBRARIES Qt5::Core)
     set(QUAZIP_TEST_QT_LIBRARIES Qt5::Core Qt5::Network Qt5::Test)
-    set(QUAZIP_PKGCONFIG_REQUIRES "zlib, Qt5Core")
-elseif(QUAZIP_QT_MAJOR_VERSION EQUAL 4)
-    find_package(Qt4 4.5.0 REQUIRED COMPONENTS QtCore
-            OPTIONAL_COMPONENTS QtNetwork QtTest)
-    set(QUAZIP_QT_ZLIB_COMPONENT Zlib)
-    set(QUAZIP_LIB_LIBRARIES Qt4::QtCore)
-    set(QUAZIP_TEST_QT_LIBRARIES Qt4::QtCore Qt4::QtNetwork Qt4::QtTest)
-    set(QUAZIP_PKGCONFIG_REQUIRES "zlib, QtCore")
+    set(QUAZIP_PKGCONFIG_REQUIRES_LIST zlib Qt5Core)
 else()
 	message(FATAL_ERROR "Qt version ${QUAZIP_QT_MAJOR_VERSION} is not supported")
 endif()
@@ -186,8 +176,30 @@ if(QUAZIP_BZIP2)
         list(APPEND QUAZIP_LBD ${BZIP2_LIBRARY_DIRS})
 
         set(PC_PRIVATE_LIBS "${PC_PRIVATE_LIBS} -lbzip2")
+
+        set(QUAZIP_BZIP2_BUILD FALSE)
     elseif(QUAZIP_FETCH_LIBS)
-        clone_repo(bzip2 https://sourceware.org/git/bzip2.git)
+        include(FetchContent)
+        set(_bzip2_primary_url "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz")
+        set(_bzip2_fallback_url "https://mirror.bazel.build/sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz")
+        set(_bzip2_hash "SHA256=ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269")
+        if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+            FetchContent_Declare(bzip2
+                URL "${_bzip2_primary_url}" "${_bzip2_fallback_url}"
+                URL_HASH ${_bzip2_hash}
+                SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/bzip2)
+        else()
+            FetchContent_Declare(bzip2
+                URL "${_bzip2_primary_url}"
+                URL_HASH ${_bzip2_hash}
+                SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/bzip2)
+        endif()
+        FetchContent_GetProperties(bzip2 POPULATED bzip2_POPULATED)
+        if(NOT bzip2_POPULATED)
+            FetchContent_MakeAvailable(bzip2)
+        endif()
+        set(BZIP2_SOURCE_DIR ${bzip2_SOURCE_DIR})
+        set(BZIP2_BINARY_DIR ${bzip2_BINARY_DIR})
 
         # BZip2 repository does not support cmake so we have to create
         # the bzip2 library ourselves
@@ -206,6 +218,14 @@ if(QUAZIP_BZIP2)
 
         add_library(bzip2 STATIC ${BZIP2_SRC} ${BZIP2_HDR})
 
+        set_target_properties(bzip2 PROPERTIES
+            PUBLIC_HEADER "${BZIP2_SOURCE_DIR}/bzlib.h"
+        )
+        target_include_directories(bzip2 PUBLIC
+          $<BUILD_INTERFACE:${BZIP2_SOURCE_DIR}>
+          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        )
+
         if(NOT QUAZIP_BZIP2_STDIO)
             target_compile_definitions(bzip2 PRIVATE -DBZ_NO_STDIO)
         endif()
@@ -213,6 +233,8 @@ if(QUAZIP_BZIP2)
         list(APPEND QUAZIP_DEP bzip2)
         list(APPEND QUAZIP_LIB bzip2)
         list(APPEND QUAZIP_INC ${BZIP2_SOURCE_DIR})
+
+        set(QUAZIP_BZIP2_BUILD ON)
     else()
         message(STATUS "BZip2 library not found")
 
@@ -225,6 +247,33 @@ if(QUAZIP_BZIP2)
     endif()
 endif()
 
+if(QUAZIP_ENABLE_QTEXTCODEC)
+    if(QUAZIP_QT_MAJOR_VERSION EQUAL 6)
+        find_package(Qt6 OPTIONAL_COMPONENTS Core5Compat)
+        if(Qt6Core5Compat_FOUND)
+            set(QUAZIP_LIB_LIBRARIES ${QUAZIP_LIB_LIBRARIES} Qt6::Core5Compat)
+            set(QUAZIP_TEST_QT_LIBRARIES ${QUAZIP_TEST_QT_LIBRARIES} Qt6::Core5Compat)
+            list(APPEND QUAZIP_PKGCONFIG_REQUIRES_LIST Qt6Core5Compat)
+
+            set(QUAZIP_CAN_USE_QTEXTCODEC TRUE)
+            message("-- Quazip can use QTextCodec")
+        else()
+            message("-- Core5Compat not found, QTextCodec support disabled")
+        endif()
+    else()
+        set(QUAZIP_CAN_USE_QTEXTCODEC TRUE)
+        message("-- Quazip can use QTextCodec")
+    endif()
+else()
+    if(QUAZIP_QT_MAJOR_VERSION EQUAL 5)
+        message(FATAL_ERROR "QUAZIP_ENABLE_QTEXTCODEC=OFF is not supported for Qt 5 (QStringConverter is unavailable).")
+    endif()
+    message("-- QTextCodec explicitly disabled by QUAZIP_ENABLE_QTEXTCODEC=OFF")
+endif()
+
+configure_file(quazip/quazip_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/quazip/quazip_config.h)
+
+list(JOIN QUAZIP_PKGCONFIG_REQUIRES_LIST ", " QUAZIP_PKGCONFIG_REQUIRES)
 add_subdirectory(quazip)
 
 if(QUAZIP_ENABLE_TESTS)

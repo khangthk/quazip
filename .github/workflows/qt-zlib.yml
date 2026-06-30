@@ -4,8 +4,11 @@ on:
       - master
       - feature/*
   pull_request:
+  workflow_dispatch:
 
 name: qt-zlib
+
+permissions: read-all
 
 env:
   BUILD_TYPE: Release
@@ -20,11 +23,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        qt_version: [ 5.15.12, 6.4.3, 6.6.2 ]
+        qt_version: [ 5.15.12, 6.4.3, 6.8.2 ]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure CMake
         run: cmake -DCMAKE_BUILD_TYPE="${{env.BUILD_TYPE}}" -DBUILD_SHARED_LIBS=OFF -DQUAZIP_ENABLE_TESTS=ON -DQUAZIP_USE_QT_ZLIB=ON -DCMAKE_PREFIX_PATH="/usr/local/Qt-${{ matrix.qt_version }}" -B build
@@ -43,11 +46,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        qt_version: [ 6.6.2 ]
+        qt_version: [ 6.8.2 ]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: TheMrMilchmann/setup-msvc-dev@v3
         with:
@@ -72,7 +75,7 @@ jobs:
         if: steps.cache-qt-restore.outputs.cache-hit != 'true' && steps.cache-qt-zip-restore.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          curl https://ftp.fau.de/qtproject/archive/qt/6.6/${{ matrix.qt_version }}/single/qt-everywhere-src-${{ matrix.qt_version }}.zip --output qt-everywhere-src-${{ matrix.qt_version }}.zip
+          curl https://ftp.fau.de/qtproject/archive/qt/6.8/${{ matrix.qt_version }}/single/qt-everywhere-src-${{ matrix.qt_version }}.zip --output qt-everywhere-src-${{ matrix.qt_version }}.zip
 
       - name: Save Qt zip
         if: steps.cache-qt-restore.outputs.cache-hit != 'true' && steps.cache-qt-zip-restore.outputs.cache-hit != 'true'
@@ -180,11 +183,13 @@ jobs:
       - name: Run tests
         shell: cmd
         working-directory: ${{github.workspace}}/build
-        run: ctest --verbose --output-on-failure -C Release
+        env:
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1 # !! qDebug() is not visible if this is not set on Win runners
+        run: ctest --extra-verbose -C Release
 
   use-qt5-zlib-windows:
     if: true
-    runs-on: windows-latest
+    runs-on: windows-2022
     name: use-qt5-zlib-windows-${{ matrix.qt_version }}
     strategy:
       fail-fast: false
@@ -193,7 +198,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: TheMrMilchmann/setup-msvc-dev@v3
         with:
@@ -316,4 +321,6 @@ jobs:
       - name: Run tests
         shell: cmd
         working-directory: build
+        env:
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1 # !! qDebug() is not visible if this is not set on Win runners
         run: ctest --extra-verbose -C Release
